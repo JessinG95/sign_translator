@@ -1,0 +1,10 @@
+opencv-python>=4.9.0
+mediapipe>=0.10.9
+torch>=2.1.0
+numpy>=1.24.0
+pyttsx3>=2.90
+# Optional (only needed if using the "gtts" TTS backend in tts/speak.py)
+gTTS>=2.5.0
+playsound==1.2.2
+# Optional (only needed if using the T5Seq2Seq wrapper in models/seq2seq_transformer.py)
+transformers>=4.38.0
