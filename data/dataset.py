@@ -34,45 +34,98 @@ from utils.vocab import word_tokenize
 
 
 class SignRecognitionDataset(Dataset):
-    def __init__(self, data_dir=config.DATA_DIR, window_size=config.SLIDING_WINDOW_SIZE):
+    def __init__(
+        self,
+        data_dir=config.DATA_DIR,
+        window_size=config.SLIDING_WINDOW_SIZE,
+        classes=None,
+    ):
         self.window_size = window_size
-        self.samples = []          # list of (filepath, label_str)
-        self.classes = sorted([
-            d for d in os.listdir(data_dir)
-            if os.path.isdir(os.path.join(data_dir, d))
-        ])
-        self.class_to_idx = {c: i for i, c in enumerate(self.classes)}
+        self.data_dir = data_dir
+        self.samples = []
 
-        for cls in self.classes:
-            cls_dir = os.path.join(data_dir, cls)
-            for fname in os.listdir(cls_dir):
-                if fname.endswith(".npy"):
-                    self.samples.append((os.path.join(cls_dir, fname), cls))
+        if not os.path.isdir(data_dir):
+            raise FileNotFoundError(
+                f"Dataset directory not found: {data_dir}"
+            )
+
+        # Use a shared class ordering when one is supplied.
+        if classes is None:
+            self.classes = sorted([
+                d for d in os.listdir(data_dir)
+                if os.path.isdir(os.path.join(data_dir, d))
+            ])
+        else:
+            self.classes = list(classes)
+
+        if not self.classes:
+            raise RuntimeError(
+                f"No class folders found in {data_dir}"
+            )
+
+        self.class_to_idx = {
+            class_name: idx
+            for idx, class_name in enumerate(self.classes)
+        }
+
+        for class_name in self.classes:
+            class_dir = os.path.join(data_dir, class_name)
+
+            if not os.path.isdir(class_dir):
+                raise FileNotFoundError(
+                    f"Expected class folder not found: {class_dir}"
+                )
+
+            for filename in sorted(os.listdir(class_dir)):
+                if filename.endswith(".npy"):
+                    self.samples.append(
+                        (os.path.join(class_dir, filename), class_name)
+                    )
 
     def __len__(self):
         return len(self.samples)
 
     def __getitem__(self, idx):
-        path, cls = self.samples[idx]
-        arr = np.load(path)  # (T, feature_dim)
+        path, class_name = self.samples[idx]
+
+        arr = np.load(path)
+
+        if arr.ndim != 2:
+            raise ValueError(
+                f"Expected a 2D array (frames, features): {path}"
+            )
+
+        if arr.shape[1] != config.FRAME_FEATURE_DIM:
+            raise ValueError(
+                f"Expected {config.FRAME_FEATURE_DIM} features, "
+                f"but found {arr.shape[1]} in {path}"
+            )
+
+        if arr.shape[0] == 0:
+            raise ValueError(f"Empty sequence found: {path}")
+
+        if not np.isfinite(arr).all():
+            raise ValueError(f"NaN or infinite values found: {path}")
+
         arr = self._fit_to_window(arr)
-        label = self.class_to_idx[cls]
+        label = self.class_to_idx[class_name]
+
         return torch.from_numpy(arr).float(), label, arr.shape[0]
 
     def _fit_to_window(self, arr):
-        """Pad or center-crop a variable-length sequence to a fixed window
-        so batches can be stacked. For sequences shorter than the window,
-        pads with the last frame; for longer, takes the center slice."""
+        """Center-crop or pad a sequence to the configured window size."""
         T = arr.shape[0]
-        w = self.window_size
-        if T == w:
-            return arr
-        if T < w:
-            pad = np.repeat(arr[-1:], w - T, axis=0)
-            return np.concatenate([arr, pad], axis=0)
-        start = (T - w) // 2
-        return arr[start:start + w]
+        window = self.window_size
 
+        if T == window:
+            return arr
+
+        if T < window:
+            pad = np.repeat(arr[-1:], window - T, axis=0)
+            return np.concatenate([arr, pad], axis=0)
+
+        start = (T - window) // 2
+        return arr[start:start + window]
 
 class Gloss2SentenceDataset(Dataset):
     def __init__(self, tsv_path, gloss_vocab, sentence_vocab,
